@@ -45,5 +45,8 @@ void bi_decl_config()
 #ifdef PROBE_UART_DTR
     bi_decl(bi_1pin_with_name(PROBE_UART_DTR, "PROBE UART DTR"));
 #endif
+#ifdef PROBE_UART_RS485_DE
+    bi_decl(bi_1pin_with_name(PROBE_UART_RS485_DE, "PROBE UART RS485 DE"));
+#endif
 
 }

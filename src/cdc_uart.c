@@ -53,6 +53,13 @@ static uint rx_led_debounce;
 
 static BaudInfo_t baud_info;
 
+#ifdef PROBE_UART_RS485_DE
+static inline void cdc_uart_rs485_tx_enable(bool enable)
+{
+    gpio_put(PROBE_UART_RS485_DE, enable);
+}
+#endif
+
 void cdc_uart_init(void) {
     gpio_set_function(PROBE_UART_TX, GPIO_FUNC_UART);
     gpio_set_function(PROBE_UART_RX, GPIO_FUNC_UART);
@@ -92,6 +99,11 @@ void cdc_uart_init(void) {
     gpio_init(PROBE_UART_DTR);
     gpio_set_dir(PROBE_UART_DTR, GPIO_OUT);
     gpio_put(PROBE_UART_DTR, 1);
+#endif
+#ifdef PROBE_UART_RS485_DE
+    gpio_init(PROBE_UART_RS485_DE);
+    gpio_set_dir(PROBE_UART_RS485_DE, GPIO_OUT);
+    cdc_uart_rs485_tx_enable(false);
 #endif
 }
 
@@ -145,7 +157,14 @@ bool cdc_task(void)
         /* Batch up to half a FIFO of data - don't clog up on RX */
         watermark = MIN(watermark, 16);
         tx_len = tud_cdc_read(tx_buf, watermark);
+#ifdef PROBE_UART_RS485_DE
+        cdc_uart_rs485_tx_enable(true);
+#endif
         uart_write_blocking(PROBE_UART_INTERFACE, tx_buf, tx_len);
+#ifdef PROBE_UART_RS485_DE
+        uart_tx_wait_blocking(PROBE_UART_INTERFACE);
+        cdc_uart_rs485_tx_enable(false);
+#endif
       } else {
 #ifdef PROBE_UART_TX_LED
           if (tx_led_debounce)
@@ -193,6 +212,12 @@ void cdc_uart_set_baudrate(uint32_t baudrate) {
   tud_cdc_read_flush();
 
   uart_init(PROBE_UART_INTERFACE, baudrate);
+#ifdef PROBE_UART_HWFC
+  uart_set_hw_flow(PROBE_UART_INTERFACE, true, true);
+#endif
+#ifdef PROBE_UART_RS485_DE
+  cdc_uart_rs485_tx_enable(false);
+#endif
 }
 
 void cdc_thread(void *ptr)
