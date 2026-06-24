@@ -44,6 +44,7 @@
 #include "autobaud.h"
 #include "get_serial.h"
 #include "tusb_edpt_handler.h"
+#include "status_led.h"
 #include "DAP.h"
 #include "hardware/structs/usb.h"
 
@@ -64,6 +65,32 @@ static uint8_t RxDataBuffer[CFG_TUD_HID_EP_BUFSIZE];
 TaskHandle_t dap_taskhandle, tud_taskhandle, mon_taskhandle;
 
 static int was_configured;
+
+static void suspend_task_if_valid(TaskHandle_t task)
+{
+    if (task != NULL)
+        vTaskSuspend(task);
+}
+
+static void resume_task_if_valid(TaskHandle_t task)
+{
+    if (task != NULL)
+        vTaskResume(task);
+}
+
+static void delete_task_if_valid(TaskHandle_t *task)
+{
+    if (*task != NULL) {
+        vTaskDelete(*task);
+        *task = NULL;
+    }
+}
+
+static void stop_autobaud_if_running(void)
+{
+    if ((autobaud_taskhandle != NULL) && autobaud_running)
+        autobaud_wait_stop();
+}
 
 void dev_mon(void *ptr)
 {
@@ -98,6 +125,8 @@ void tud_event_hook_cb(uint8_t rhport, uint32_t eventid, bool in_isr)
 {
   (void) rhport;
   (void) eventid;
+  if (tud_taskhandle == NULL)
+    return;
   BaseType_t blah;
   if (in_isr) {
     xTaskNotifyFromISR(tud_taskhandle, 0, 0, &blah);
@@ -115,10 +144,13 @@ void usb_thread(void *ptr)
     gpio_init(PROBE_USB_CONNECTED_LED);
     gpio_set_dir(PROBE_USB_CONNECTED_LED, GPIO_OUT);
 #endif
+    status_led_set_usb_state(false, false, false);
     TickType_t wake;
     wake = xTaskGetTickCount();
     do {
         tud_task();
+        status_led_set_usb_state(tud_connected(), tud_ready(), tud_suspended());
+        status_led_tick();
 #ifdef PROBE_USB_CONNECTED_LED
         if (!gpio_get(PROBE_USB_CONNECTED_LED) && tud_ready())
             gpio_put(PROBE_USB_CONNECTED_LED, 1);
@@ -151,8 +183,8 @@ int main(void) {
     board_init();
     usb_serial_init();
     cdc_uart_init();
+    status_led_init();
     tusb_init();
-    stdio_uart_init();
 
     DAP_Setup();
 
@@ -257,11 +289,10 @@ void tud_suspend_cb(bool remote_wakeup_en)
   probe_info("Suspended\n");
   /* Were we actually configured? If not, threads don't exist */
   if (was_configured) {
-	  vTaskSuspend(uart_taskhandle);
-	  vTaskSuspend(dap_taskhandle);
-    if (autobaud_running)
-      autobaud_wait_stop();
-    vTaskSuspend(autobaud_taskhandle);
+    suspend_task_if_valid(uart_taskhandle);
+    suspend_task_if_valid(dap_taskhandle);
+    stop_autobaud_if_running();
+    suspend_task_if_valid(autobaud_taskhandle);
   }
   /* slow down clk_sys for power saving ? */
 }
@@ -270,23 +301,26 @@ void tud_resume_cb(void)
 {
   probe_info("Resumed\n");
   if (was_configured) {
-    vTaskResume(uart_taskhandle);
-    vTaskResume(dap_taskhandle);
-    vTaskResume(autobaud_taskhandle);
+    resume_task_if_valid(uart_taskhandle);
+    resume_task_if_valid(dap_taskhandle);
+    resume_task_if_valid(autobaud_taskhandle);
   }
 }
 
 void tud_unmount_cb(void)
 {
   probe_info("Disconnected/reset\n");
-  vTaskSuspend(uart_taskhandle);
-  vTaskSuspend(dap_taskhandle);
-  vTaskDelete(uart_taskhandle);
-  vTaskDelete(dap_taskhandle);
-  if (autobaud_running)
-    autobaud_wait_stop();
-  vTaskSuspend(autobaud_taskhandle);
-  vTaskDelete(autobaud_taskhandle);
+  if (!was_configured)
+    return;
+
+  cdc_uart_reset();
+  suspend_task_if_valid(uart_taskhandle);
+  suspend_task_if_valid(dap_taskhandle);
+  stop_autobaud_if_running();
+  suspend_task_if_valid(autobaud_taskhandle);
+  delete_task_if_valid(&uart_taskhandle);
+  delete_task_if_valid(&dap_taskhandle);
+  delete_task_if_valid(&autobaud_taskhandle);
   was_configured = 0;
 }
 
@@ -294,12 +328,26 @@ void tud_mount_cb(void)
 {
   probe_info("Connected, Configured: %d\n", !!was_configured);
   if (!was_configured) {
+    BaseType_t uart_created;
+    BaseType_t dap_created;
+    BaseType_t autobaud_created;
+
+    uart_taskhandle = NULL;
+    dap_taskhandle = NULL;
+    autobaud_taskhandle = NULL;
+
     /* UART needs to preempt USB as if we don't, characters get lost */
-    xTaskCreate(cdc_thread, "UART", configMINIMAL_STACK_SIZE, NULL, UART_TASK_PRIO, &uart_taskhandle);
+    uart_created = xTaskCreate(cdc_thread, "UART", configMINIMAL_STACK_SIZE, NULL, UART_TASK_PRIO, &uart_taskhandle);
     /* Lowest priority thread is debug - need to shuffle buffers before we can toggle swd... */
-    xTaskCreate(dap_thread, "DAP", configMINIMAL_STACK_SIZE, NULL, DAP_TASK_PRIO, &dap_taskhandle);
+    dap_created = xTaskCreate(dap_thread, "DAP", configMINIMAL_STACK_SIZE, NULL, DAP_TASK_PRIO, &dap_taskhandle);
     /* Autobaud detection using PIO as a frequency counter */
-    xTaskCreate(autobaud_thread, "ABR", configMINIMAL_STACK_SIZE, NULL, AUTOBAUD_TASK_PRIO, &autobaud_taskhandle);
+    autobaud_created = xTaskCreate(autobaud_thread, "ABR", configMINIMAL_STACK_SIZE, NULL, AUTOBAUD_TASK_PRIO, &autobaud_taskhandle);
+    if ((uart_created != pdPASS) || (dap_created != pdPASS) || (autobaud_created != pdPASS)) {
+      delete_task_if_valid(&uart_taskhandle);
+      delete_task_if_valid(&dap_taskhandle);
+      delete_task_if_valid(&autobaud_taskhandle);
+      return;
+    }
 #if(configNUMBER_OF_CORES > 1)
     vTaskCoreAffinitySet(autobaud_taskhandle, (1 << 1));
     vTaskCoreAffinitySet(dap_taskhandle, (1 << 1));

@@ -345,10 +345,14 @@ bool autobaud_init() {
 }
 
 void autobaud_start() {
+    if (!autobaud_taskhandle)
+        return;
     xTaskNotify(autobaud_taskhandle, AUTOBAUD_CMD_START, eSetValueWithOverwrite);
 }
 
 void autobaud_wait_stop() {
+    if (!autobaud_taskhandle)
+        return;
     while (!autobaud_stopped)
         xTaskNotify(autobaud_taskhandle, AUTOBAUD_CMD_STOP, eSetValueWithOverwrite);
 }

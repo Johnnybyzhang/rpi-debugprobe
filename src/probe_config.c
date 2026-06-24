@@ -45,5 +45,11 @@ void bi_decl_config()
 #ifdef PROBE_UART_DTR
     bi_decl(bi_1pin_with_name(PROBE_UART_DTR, "PROBE UART DTR"));
 #endif
+#ifdef PROBE_UART_DE
+    bi_decl(bi_1pin_with_name(PROBE_UART_DE, "PROBE UART DE"));
+#endif
+#ifdef PROBE_WS2812_STATUS_LED
+    bi_decl(bi_1pin_with_name(PROBE_WS2812_STATUS_LED, "PROBE WS2812 STATUS LED"));
+#endif
 
 }
