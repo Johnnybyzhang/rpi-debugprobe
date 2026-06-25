@@ -28,6 +28,7 @@
 #include "DAP_config.h"
 #include "DAP.h"
 #include "probe.h"
+#include "status_led.h"
 
 /* Slight hack - we're not bitbashing so we need to set baudrate off the DAP's delay cycles.
  * Ideally we don't want calls to udiv everywhere... */
@@ -42,6 +43,8 @@ volatile uint32_t cached_delay = 0;
 void SWJ_Sequence (uint32_t count, const uint8_t *data) {
   uint32_t bits;
   uint32_t n;
+
+  status_led_note_swdio();
 
   if (DAP_Data.clock_delay != cached_delay) {
     probe_set_swclk_freq(MAKE_KHZ(DAP_Data.clock_delay));
@@ -69,6 +72,8 @@ void SWJ_Sequence (uint32_t count, const uint8_t *data) {
 void SWD_Sequence (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
   uint32_t bits;
   uint32_t n;
+
+  status_led_note_swdio();
 
   if (DAP_Data.clock_delay != cached_delay) {
     probe_set_swclk_freq(MAKE_KHZ(DAP_Data.clock_delay));
@@ -114,6 +119,8 @@ uint8_t SWD_Transfer (uint32_t request, uint32_t *data) {
   uint32_t val = 0;
   uint32_t parity = 0;
   uint32_t n;
+
+  status_led_note_swdio();
 
   if (DAP_Data.clock_delay != cached_delay) {
     probe_set_swclk_freq(MAKE_KHZ(DAP_Data.clock_delay));

@@ -25,6 +25,7 @@ typedef struct {
 enum {
     STATUS_LED_EVENT_TX = 1u << 0,
     STATUS_LED_EVENT_RX = 1u << 1,
+    STATUS_LED_EVENT_SWDIO = 1u << 2,
 };
 
 static PIO status_led_pio = pio1;
@@ -44,6 +45,7 @@ static const status_led_color_t color_ready = {0, 2, 0};
 static const status_led_color_t color_suspended = {2, 1, 0};
 static const status_led_color_t color_tx = {3, 0, 3};
 static const status_led_color_t color_rx = {0, 3, 3};
+static const status_led_color_t color_swdio = {3, 2, 0};
 static const status_led_color_t color_tx_rx = {2, 2, 2};
 
 #define STATUS_LED_PULSE_TICKS pdMS_TO_TICKS(45)
@@ -81,6 +83,8 @@ static status_led_color_t status_led_base_color(void)
 
 static status_led_color_t status_led_activity_color(uint32_t events)
 {
+    if (events & STATUS_LED_EVENT_SWDIO)
+        return color_swdio;
     if ((events & (STATUS_LED_EVENT_TX | STATUS_LED_EVENT_RX)) ==
         (STATUS_LED_EVENT_TX | STATUS_LED_EVENT_RX)) {
         return color_tx_rx;
@@ -149,6 +153,13 @@ void status_led_note_uart_rx(void)
 {
 #ifdef PROBE_WS2812_STATUS_LED
     status_led_note_activity(STATUS_LED_EVENT_RX);
+#endif
+}
+
+void status_led_note_swdio(void)
+{
+#ifdef PROBE_WS2812_STATUS_LED
+    status_led_note_activity(STATUS_LED_EVENT_SWDIO);
 #endif
 }
 
